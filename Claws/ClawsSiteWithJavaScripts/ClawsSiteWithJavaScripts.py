@@ -1,6 +1,5 @@
 """
 爬取论文，专利等。
-其中谷歌驱动链接：
 """
 import os
 import time
