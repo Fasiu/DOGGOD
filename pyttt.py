@@ -156,6 +156,7 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
 
 
+
 class MessageWidget(QWidget):
     """单个消息部件"""
 
@@ -643,8 +644,11 @@ class ResizableFloatingWindow(QMainWindow):
         dialog = SettingsDialog(self)
         dialog.api_url.setText(self.api_url)
         dialog.method_combo.setCurrentText(self.method)
-        dialog.headers_edit.setPlainText(json.dumps(self.headers, indent=2))
-        dialog.data_edit.setPlainText(json.dumps(self.data, indent=2))
+
+        # 确保JSON数据正确显示（不显示Unicode转义序列）
+        dialog.headers_edit.setPlainText(json.dumps(self.headers, indent=2, ensure_ascii=False))
+        dialog.data_edit.setPlainText(json.dumps(self.data, indent=2, ensure_ascii=False))
+
         dialog.shortcut_edit.setText(self.hotkey)
 
         if dialog.exec_() == QDialog.Accepted:
@@ -653,13 +657,15 @@ class ResizableFloatingWindow(QMainWindow):
             self.method = dialog.method_combo.currentText()
 
             try:
-                self.headers = json.loads(
-                    dialog.headers_edit.toPlainText()) if dialog.headers_edit.toPlainText() else {}
-            except:
+                headers_text = dialog.headers_edit.toPlainText()
+                self.headers = json.loads(headers_text) if headers_text else {}
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse headers: {e}")
                 self.headers = {}
 
             try:
-                new_data = json.loads(dialog.data_edit.toPlainText()) if dialog.data_edit.toPlainText() else {}
+                data_text = dialog.data_edit.toPlainText()
+                new_data = json.loads(data_text) if data_text else {}
                 # 保留现有的消息历史
                 if "messages" in new_data:
                     self.data["messages"] = new_data["messages"]
@@ -667,7 +673,8 @@ class ResizableFloatingWindow(QMainWindow):
                 for key in new_data:
                     if key != "messages":
                         self.data[key] = new_data[key]
-            except:
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse data: {e}")
                 pass
 
             # 重新注册快捷键
