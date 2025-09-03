@@ -7,9 +7,9 @@ import keyboard
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel,
                              QTextEdit, QVBoxLayout, QHBoxLayout, QSystemTrayIcon,
                              QMenu, QAction, QStyle, QLineEdit, QPushButton, QDialog, QComboBox,
-                             QScrollArea)
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QThread, QTimer
-from PyQt5.QtGui import QIcon, QFont, QCursor, QTextCursor
+                             QScrollArea, QSizeGrip, QFrame)
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QThread, QTimer, QSize, QRect
+from PyQt5.QtGui import QIcon, QFont, QCursor, QTextCursor, QMouseEvent
 
 
 class StreamingAPICallThread(QThread):
@@ -24,10 +24,6 @@ class StreamingAPICallThread(QThread):
         self.method = method
         self.data = data
         self.headers = headers
-
-    import json
-    import requests
-    from typing import Any, Dict
 
     def run(self):
         try:
@@ -110,7 +106,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.setFixedSize(1000, 1000)
+        self.setFixedSize(400, 500)
 
         layout = QVBoxLayout()
 
@@ -194,9 +190,10 @@ class MessageWidget(QWidget):
         self.setLayout(layout)
 
 
-class FloatingWindow(QMainWindow):
+class ResizableFloatingWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.minimum_size = QSize(400, 300)
         self.initUI()
         self.initTray()
         self.initHotkeys()
@@ -220,11 +217,18 @@ class FloatingWindow(QMainWindow):
         self.current_bot_response = ""
         self.current_response_widget = None
 
+        # 窗口大小调整相关
+        self.dragging = False
+        self.resizing = False
+        self.drag_position = QPoint()
+        self.resize_edge = None
+        self.margin = 8
+
     def initUI(self):
         # 设置窗口属性
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(600, 300)
+        self.setMinimumSize(self.minimum_size)
 
         # 中心部件
         central_widget = QWidget()
@@ -282,26 +286,215 @@ class FloatingWindow(QMainWindow):
 
         # 输入区域
         input_widget = QWidget()
+        input_widget.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 5px;
+            }
+        """)
         input_layout = QHBoxLayout(input_widget)
+        input_layout.setContentsMargins(5, 5, 5, 5)
 
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("输入您的问题...")
+        self.input_field.setStyleSheet("""
+            QLineEdit {
+                background-color: white;
+                color: black;
+                border: 1px solid #d9d9d9;
+                border-radius: 3px;
+                padding: 5px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #1890ff;
+            }
+        """)
         self.input_field.returnPressed.connect(self.sendMessage)
         input_layout.addWidget(self.input_field)
 
         send_btn = QPushButton("发送")
+        send_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1890ff;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 10px;
+                margin-left: 5px;
+            }
+            QPushButton:hover {
+                background-color: #40a9ff;
+            }
+        """)
         send_btn.clicked.connect(self.sendMessage)
         input_layout.addWidget(send_btn)
 
         clear_btn = QPushButton("清空")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f5222d;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 10px;
+                margin-left: 5px;
+            }
+            QPushButton:hover {
+                background-color: #ff4d4f;
+            }
+        """)
         clear_btn.clicked.connect(self.clearConversation)
         input_layout.addWidget(clear_btn)
 
         main_layout.addWidget(input_widget)
 
-        # 存储鼠标位置用于拖动
-        self.dragging = False
-        self.offset = QPoint()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.pos()
+
+            # 检查是否在标题栏区域（用于拖动）
+            title_bar_rect = QRect(5, 5, self.width() - 10, 20)  # 稍微宽松的标题栏检测
+            if title_bar_rect.contains(pos):
+                self.dragging = True
+                self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+                event.accept()
+                return
+
+            # 检查是否在边缘区域（用于调整大小）
+            edge = self.getEdgeAt(pos)
+
+            if edge:
+                self.resizing = True
+                self.resize_edge = edge
+                self.resize_start_pos = event.globalPos()
+                self.resize_start_geometry = self.geometry()
+                event.accept()
+                return
+
+    def getEdgeAt(self, pos):
+        """获取鼠标位置对应的边缘 - 使用窗口几何位置"""
+        # 使用窗口的实际几何位置进行边缘检测
+        rect = QRect(0, 0, self.width(), self.height())
+        margin = 10  # 边缘检测区域
+
+        # 检查角落
+        if pos.x() <= margin and pos.y() <= margin:
+            return 'top left'
+        elif pos.x() >= rect.width() - margin and pos.y() <= margin:
+            return 'top right'
+        elif pos.x() <= margin and pos.y() >= rect.height() - margin:
+            return 'bottom left'
+        elif pos.x() >= rect.width() - margin and pos.y() >= rect.height() - margin:
+            return 'bottom right'
+
+        # 检查边缘
+        elif pos.x() <= margin:
+            return 'left'
+        elif pos.x() >= rect.width() - margin:
+            return 'right'
+        elif pos.y() <= margin:
+            return 'top'
+        elif pos.y() >= rect.height() - margin:
+            return 'bottom'
+
+        return None
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+
+        # 实时更新光标形状（即使没有按下鼠标）
+        edge = self.getEdgeAt(pos)
+        if edge:
+            self.updateCursor(edge)
+        else:
+            self.unsetCursor()
+
+        # 处理拖动
+        if event.buttons() == Qt.LeftButton and self.dragging:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            return
+
+        # 处理调整大小
+        if event.buttons() == Qt.LeftButton and self.resizing and self.resize_edge:
+            global_pos = event.globalPos()
+
+            # 直接使用当前鼠标位置来计算新的几何形状
+            new_geom = self.geometry()
+
+            if 'left' in self.resize_edge:
+                new_geom.setLeft(global_pos.x())
+            if 'right' in self.resize_edge:
+                new_geom.setRight(global_pos.x())
+            if 'top' in self.resize_edge:
+                new_geom.setTop(global_pos.y())
+            if 'bottom' in self.resize_edge:
+                new_geom.setBottom(global_pos.y())
+
+            # 确保最小尺寸
+            min_width = max(100, self.minimum_size.width())
+            min_height = max(60, self.minimum_size.height())
+
+            if new_geom.width() < min_width:
+                if 'left' in self.resize_edge:
+                    new_geom.setLeft(new_geom.right() - min_width)
+                else:
+                    new_geom.setRight(new_geom.left() + min_width)
+
+            if new_geom.height() < min_height:
+                if 'top' in self.resize_edge:
+                    new_geom.setTop(new_geom.bottom() - min_height)
+                else:
+                    new_geom.setBottom(new_geom.top() + min_height)
+
+            self.setGeometry(new_geom)
+
+            # 更新起始位置，确保连续调整大小
+            self.resize_start_pos = global_pos
+            self.resize_start_geometry = new_geom
+
+            event.accept()
+            return
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dragging = False
+            self.resizing = False
+            self.resize_edge = None
+            self.unsetCursor()
+
+            # 鼠标释放后也需要更新光标状态
+            pos = self.mapFromGlobal(QCursor.pos())
+            edge = self.getEdgeAt(pos)
+            if edge:
+                self.updateCursor(edge)
+
+    def updateCursor(self, edge):
+        """根据边缘更新光标"""
+        cursors = {
+            'left': Qt.SizeHorCursor,
+            'right': Qt.SizeHorCursor,
+            'top': Qt.SizeVerCursor,
+            'bottom': Qt.SizeVerCursor,
+            'top left': Qt.SizeFDiagCursor,
+            'top right': Qt.SizeBDiagCursor,
+            'bottom left': Qt.SizeBDiagCursor,
+            'bottom right': Qt.SizeFDiagCursor
+        }
+        self.setCursor(cursors.get(edge, Qt.ArrowCursor))
+
+    def enterEvent(self, event):
+        """鼠标进入窗口时更新光标"""
+        pos = self.mapFromGlobal(QCursor.pos())
+        edge = self.getEdgeAt(pos)
+        if edge:
+            self.updateCursor(edge)
+        else:
+            self.unsetCursor()
+
+    def leaveEvent(self, event):
+        """鼠标离开窗口时恢复默认光标"""
+        self.unsetCursor()
 
     def initTray(self):
         # 创建系统托盘图标
@@ -499,20 +692,6 @@ class FloatingWindow(QMainWindow):
         self.tray_icon.hide()
         QApplication.quit()
 
-    # 实现窗口拖动
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.offset = event.globalPos() - self.pos()
-
-    def mouseMoveEvent(self, event):
-        if self.dragging and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPos() - self.offset)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging = False
-
     def closeEvent(self, event):
         event.ignore()
         self.hide()
@@ -521,6 +700,6 @@ class FloatingWindow(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setFont(QFont("Microsoft YaHei", 9))
-    window = FloatingWindow()
+    window = ResizableFloatingWindow()
     window.show()
     sys.exit(app.exec_())
